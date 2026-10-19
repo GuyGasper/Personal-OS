@@ -1,0 +1,82 @@
+name: CI / CD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish tested ARM64 images to OCIR (main only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  verify:
+    name: Build and test
+    uses: ./.github/workflows/verify.yaml
+    with:
+      export-images: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
+
+  publish:
+    name: Publish tested ARM64 images
+    needs: verify
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: personal-os-ocir
+      cancel-in-progress: false
+    env:
+      REGISTRY: ${{ vars.OCIR_REGISTRY }}
+      OCI_NAMESPACE: ${{ vars.OCI_NAMESPACE }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: tested-arm64-images-${{ github.sha }}
+          path: artifacts/tested-images
+      - name: Log in to OCIR
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_AUTH_TOKEN: ${{ secrets.OCIR_AUTH_TOKEN }}
+        run: |
+          : "${REGISTRY:?Set production variable OCIR_REGISTRY}"
+          : "${OCI_NAMESPACE:?Set production variable OCI_NAMESPACE}"
+          : "${OCIR_USERNAME:?Set production secret OCIR_USERNAME}"
+          : "${OCIR_AUTH_TOKEN:?Set production secret OCIR_AUTH_TOKEN}"
+          printf '%s' "$OCIR_AUTH_TOKEN" | docker login "$REGISTRY" --username "$OCIR_USERNAME" --password-stdin
+      - name: Publish the verified images without rebuilding
+        env:
+          IMAGE_BUNDLE_DIR: artifacts/tested-images
+        run: bash scripts/publish-images.sh
+      - name: Save release image digests
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ github.sha }}
+          path: .local/release.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record deployment image digests
+        run: |
+          {
+            echo 'Published the ARM64 images tested by this run:'
+            echo '~~~json'
+            cat .local/release.json
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Log out of OCIR
+        if: always()
+        run: |
+          if [[ -n "$REGISTRY" ]]; then docker logout "$REGISTRY"; fi

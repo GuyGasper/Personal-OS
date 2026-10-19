@@ -1,0 +1,21 @@
+services:
+  personal-os-api:
+    build: ./backend
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:8081:8080"
+  frontend:
+    build: ./frontend
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - personal-os-api

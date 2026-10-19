@@ -1,0 +1,8 @@
+# Use with compose.yaml; CI runs on native ARM64 GitHub-hosted runners.
+services:
+  personal-os-api:
+    image: ${API_IMAGE:?Set API_IMAGE}
+    platform: linux/arm64
+  frontend:
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE}
+    platform: linux/arm64

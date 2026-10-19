@@ -1,0 +1,99 @@
+name: Build and test ARM64
+
+on:
+  workflow_call:
+    inputs:
+      export-images:
+        description: Save verified container images for the publishing job
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    name: Java, React, and ARM64 containers
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    env:
+      API_IMAGE: personal-os-api:ci-${{ github.sha }}
+      FRONTEND_IMAGE: personal-os-frontend:ci-${{ github.sha }}
+      SOURCE_SHA: ${{ github.sha }}
+      COMPOSE_FILE: compose.yaml:compose.ci.yaml
+      COMPOSE_PROJECT_NAME: personal-os-ci
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Verify Java API and lifecycle health probes
+        run: mvn -B -ntp -f backend/pom.xml verify
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Type-check and build React
+        run: npm run build
+        working-directory: frontend
+      - name: Check deployment scripts
+        run: |
+          for script in scripts/*.sh; do bash -n "$script"; done
+          python3 -m unittest discover -s scripts/tests -v
+      - name: Build native ARM64 images
+        run: docker compose build --pull
+      - name: Test containers with read-only filesystems
+        run: bash scripts/test-containers.sh
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Test the React app against the containerized API
+        run: npm run test:e2e
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:8080
+      - name: Export the images that passed verification
+        if: ${{ inputs.export-images }}
+        run: |
+          python3 scripts/image-bundle.py export \
+            --source-sha "$SOURCE_SHA" --api-image "$API_IMAGE" --frontend-image "$FRONTEND_IMAGE" \
+            --bundle-dir artifacts/tested-images
+      - name: Upload tested ARM64 images
+        if: ${{ inputs.export-images }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tested-arm64-images-${{ github.sha }}
+          path: artifacts/tested-images/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+      - name: Capture container logs
+        if: always()
+        run: |
+          mkdir -p artifacts
+          docker compose logs --no-color > artifacts/container-logs.txt 2>&1
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend/target/surefire-reports/
+            frontend/playwright-report/
+            frontend/test-results/
+            artifacts/container-logs.txt
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Stop test containers
+        if: always()
+        run: docker compose down --volumes --remove-orphans

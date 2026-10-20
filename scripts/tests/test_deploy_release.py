@@ -106,6 +106,37 @@ class DeployReleaseTest(unittest.TestCase):
         self.assert_previous()
         self.smoke.assert_not_called()
 
+    def test_only_one_component_can_be_updating_at_a_time(self):
+        pending = set()
+        original_patch = self.client.patch
+        original_rollout = self.client.rollout
+
+        def patch_with_capacity_check(name, container, expected, desired, dry_run=False):
+            if not dry_run and desired in IMAGES.values():
+                if pending - {name}:
+                    raise RuntimeError("Another component still needs rollout capacity")
+                pending.add(name)
+            return original_patch(name, container, expected, desired, dry_run)
+
+        def complete_rollout(name, seconds=300):
+            original_rollout(name, seconds)
+            pending.discard(name)
+
+        self.client.patch = patch_with_capacity_check
+        self.client.rollout = complete_rollout
+        self.run_deploy()
+        self.assertEqual(pending, set())
+        self.smoke.assert_called_once()
+
+    def test_api_rollout_failure_leaves_frontend_untouched(self):
+        self.client.fail_rollout = "personal-os-api"
+        with self.assertRaisesRegex(RuntimeError, "Rollout failed"):
+            self.run_deploy()
+        self.assert_previous()
+        self.assertFalse(any(name == "personal-os-frontend" and not dry_run
+                             for name, image, dry_run in self.client.patches))
+        self.smoke.assert_not_called()
+
     def test_https_failure_restores_both_images(self):
         self.smoke.side_effect = RuntimeError("HTTPS failed")
         with patch.object(deploy.time, "sleep"), self.assertRaisesRegex(RuntimeError, "HTTPS"):

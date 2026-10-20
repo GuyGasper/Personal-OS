@@ -113,8 +113,8 @@ def promote(client, images, smoke, snapshot, dry_run=False):
             if previous[component] != images[component]:
                 # Record intent before patch: an API timeout may hide a successful mutation.
                 changed.append(component)
+                print(f"Updating {name}; waiting before starting the next component.", flush=True)
                 client.patch(name, container, previous[component], images[component])
-        for component, (name, container) in COMPONENTS.items():
             client.rollout(name)
             if client.image(client.get(name), container) != images[component]:
                 raise RuntimeError(f"{name} is not running the requested image")

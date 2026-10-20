@@ -7,8 +7,9 @@ A manual run with publish unchecked only verifies the application.
 
 The deployment job consumes the immutable image digests published by that same
 run. It does not rebuild images or apply infrastructure manifests. It patches the
-API and frontend container images, waits for both deployments, and tests HTTPS
-against the existing load balancer for both domains.
+API image and waits for its rollout to complete before patching and waiting for
+the frontend. It then tests HTTPS against the existing load balancer for both
+domains. Both images still come from the same verified release.
 
 ## Production settings
 
@@ -91,8 +92,21 @@ that its commit is still the head of main and skips an obsolete release.
 
 Both image patches must pass a server-side dry run before either is applied.
 The job records the previous images in the `deployment-<sha>-<attempt>` artifact,
-then updates only the named application containers. Resource versions and image
-checks reject concurrent modifications.
+then updates only the named application containers. The API must finish its
+rollout before the frontend image is changed. If the API rollout fails, the
+frontend keeps its current image while the API is restored. Resource versions
+and image checks reject concurrent modifications.
+
+The infrastructure manifest requests 200m CPU for the API, with a 1-CPU limit,
+and 50m for the frontend. This leaves scheduling room for an additional API pod
+during a rolling update on the initial 1-OCPU worker. The old pod keeps serving
+until its replacement is ready (`maxUnavailable: 0`, `maxSurge: 1`). Increasing a
+timeout cannot resolve insufficient CPU requests: retain enough allocatable
+capacity for the extra pod as system components and application needs grow.
+
+Routine image deployments preserve these resource settings. Resource changes
+must also be applied from the infrastructure configuration before the image
+deployment runs; updating the source manifest alone does not change the cluster.
 
 If patching, rollout, or HTTPS verification fails, the script attempts to restore
 both previous image references and waits for recovery. The job still fails so

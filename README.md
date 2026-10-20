@@ -100,8 +100,8 @@ them to the existing private OCIR repositories. It does not rebuild after testin
 Pull requests and other branches run verification without registry credentials.
 A failed verification prevents publication and deployment. After publication, the
 deployment job temporarily permits the runner's own IP to reach OKE, updates both
-application image digests, waits for rollouts, verifies HTTPS, and removes the
-temporary rule. Failed rollout or HTTPS checks trigger restoration of the previous
+application image digests in order (API rollout, then frontend rollout), verifies
+HTTPS, and removes the temporary rule. Failed rollout or HTTPS checks trigger restoration of the previous
 images.
 
 ### One-time GitHub configuration

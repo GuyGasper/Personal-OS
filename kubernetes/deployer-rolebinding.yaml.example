@@ -1,0 +1,14 @@
+# Replace the subject with the OCI user OCID used by the deployment job.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: personal-os-deployer
+  namespace: personal-os
+subjects:
+  - kind: User
+    name: REPLACE_WITH_OCI_DEPLOY_USER_OCID
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: personal-os-deployer
+  apiGroup: rbac.authorization.k8s.io

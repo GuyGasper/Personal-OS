@@ -20,7 +20,7 @@ Browser → OCI load balancer :443 (TLS) → Nginx :8080
                                         └── /*     → React assets / SPA fallback
 ```
 
-Kubernetes configuration stays in the infrastructure repo. Its Nginx ConfigMap
+Authoritative application and infrastructure manifests stay in the infrastructure repo. Its Nginx ConfigMap
 overrides the image's bundled local configuration, preserves the API prefix, and
 sets forwarded HTTPS headers. Both containers match its users, probes, ports,
 read-only filesystems, and writable `/tmp` volumes.
@@ -86,7 +86,7 @@ OKE workers' architecture:
 
 1. Compile Java 21 and run the API HTTP/lifecycle tests.
 2. Install locked frontend dependencies, type-check, and build React.
-3. Validate scripts and run the image-publication integrity tests.
+3. Validate scripts and run publication, deployment/rollback, and network-access tests.
 4. Build both native `linux/arm64` container images.
 5. Start the containers with read-only filesystems. Check API liveness/readiness,
    Nginx health, API proxying, static JavaScript, client routes, and API 404s.
@@ -98,7 +98,11 @@ On a successful push to **main**, publishing runs automatically in the
 commit, archive checksum, architecture, and image identities, then tags and pushes
 them to the existing private OCIR repositories. It does not rebuild after testing.
 Pull requests and other branches run verification without registry credentials.
-A failed verification prevents publication.
+A failed verification prevents publication and deployment. After publication, the
+deployment job temporarily permits the runner's own IP to reach OKE, updates both
+application image digests, waits for rollouts, verifies HTTPS, and removes the
+temporary rule. Failed rollout or HTTPS checks trigger restoration of the previous
+images.
 
 ### One-time GitHub configuration
 
@@ -115,7 +119,13 @@ In **this application repository**, open **Settings → Environments**, create
 The repositories are `personal-os/api` and `personal-os/frontend`. An OCI API
 signing key is different from an OCIR auth token. Secrets configured only in
 `OCI-Infrastructure` do not automatically become available to this repository.
-Keep the TLS private key out of build jobs; these workflows do not need it.
+Keep the TLS private key out of GitHub; these workflows reuse the existing
+Kubernetes TLS secret.
+
+Automated deployment additionally needs production variables `OCI_REGION` and
+`OKE_CLUSTER_ID`, and secrets `OCI_TENANCY_OCID`, `OCI_USER_OCID`,
+`OCI_FINGERPRINT`, and `OCI_PRIVATE_KEY`. See
+[deployment setup and recovery](docs/deployment.md) for values, access, and cleanup.
 
 Restrict the `production` environment's deployment branches to `main`. Any
 environment approval rules you configure also apply before publication. To make
@@ -123,9 +133,10 @@ passing CI a merge requirement, require the workflow's **Java, React, and ARM64
 containers** check in a branch ruleset.
 
 After pushing these files, open **Actions → CI / CD**. Pull requests and pushes
-run tests automatically; pushes to `main` also publish. **Run workflow** can
-rerun verification, with an optional **publish** checkbox to publish a tested
-`main` commit manually. The first `main` publication needs the four settings above.
+run tests automatically; pushes to `main` also publish and deploy. **Run workflow**
+can rerun verification; check **publish** to publish a tested `main` commit and
+leave **deploy** checked to deploy it afterward. Configure both the registry and
+deployment settings before enabling the new job.
 
 ### Reports and release artifacts
 
@@ -136,15 +147,14 @@ Publication runs additionally transfer a tested ARM64 image bundle between jobs
 `release.json` (retained for 30 days).
 
 Published tags use the full commit SHA. The release JSON contains immutable
-registry digest references for both images. Download it from the successful run
-and save it as `.local/release.json` before running the existing OKE deployment
-script below.
+registry digest references for both images. The deployment job consumes this
+artifact automatically and saves previous image references in
+`deployment-<commit-sha>-<attempt>` for recovery (retained for 30 days).
 
-The CD stage publishes images. Applying Kubernetes manifests remains
-`scripts/deploy.sh`: the OKE API is restricted to the infrastructure's admin
-CIDRs, so a deployment runner must have permitted network access and OCI/Kubernetes
-credentials. The build/publish jobs do not change those network restrictions,
-create a load balancer, or update DNS.
+Routine deployments reuse the load balancer, TLS/pull secrets, and existing
+workload configuration. The bootstrap script below still handles initial
+manifest and secret creation. See [automated deployment](docs/deployment.md)
+for temporary network access, rollback behavior, and interrupted-run cleanup.
 
 ### Run the browser checks locally
 

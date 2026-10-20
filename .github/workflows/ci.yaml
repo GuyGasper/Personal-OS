@@ -9,6 +9,10 @@ on:
         description: Publish tested ARM64 images to OCIR (main only)
         type: boolean
         default: false
+      deploy:
+        description: Deploy after publishing (main only)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -80,3 +84,122 @@ jobs:
         if: always()
         run: |
           if [[ -n "$REGISTRY" ]]; then docker logout "$REGISTRY"; fi
+
+  deploy:
+    name: Deploy and verify OKE
+    needs: publish
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy)) }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://personal-os.tech
+    concurrency:
+      group: personal-os-production-deploy
+      cancel-in-progress: false
+    env:
+      OCI_REGION: ${{ vars.OCI_REGION }}
+      OKE_CLUSTER_ID: ${{ vars.OKE_CLUSTER_ID }}
+      OKE_ENDPOINT_NSG_ID: ${{ vars.OKE_ENDPOINT_NSG_ID }}
+      REGISTRY: ${{ vars.OCIR_REGISTRY }}
+      OCI_NAMESPACE: ${{ vars.OCI_NAMESPACE }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Skip a release superseded by a newer main commit
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/deploy-release.py --source-sha "$SOURCE_SHA" --check-source
+      - uses: actions/download-artifact@v8
+        if: steps.source.outputs.current == 'true'
+        with:
+          name: release-${{ github.sha }}
+          path: artifacts/release
+      - uses: actions/setup-python@v7
+        if: steps.source.outputs.current == 'true'
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: scripts/requirements-deploy.txt
+      - name: Install OCI CLI and verified kubectl
+        if: steps.source.outputs.current == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check -r scripts/requirements-deploy.txt
+          tools="$RUNNER_TEMP/personal-os-tools"
+          mkdir -p "$tools"
+          curl --fail --silent --show-error --retry 3 -o "$tools/kubectl" https://dl.k8s.io/release/v1.36.4/bin/linux/arm64/kubectl
+          curl --fail --silent --show-error --retry 3 -o "$tools/kubectl.sha256" https://dl.k8s.io/release/v1.36.4/bin/linux/arm64/kubectl.sha256
+          printf '%s  %s\n' "$(cat "$tools/kubectl.sha256")" "$tools/kubectl" | sha256sum --check
+          chmod +x "$tools/kubectl"
+          echo "$tools" >> "$GITHUB_PATH"
+      - name: Configure deployment credentials
+        id: credentials
+        if: steps.source.outputs.current == 'true'
+        env:
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          : "${OKE_CLUSTER_ID:?Set production variable OKE_CLUSTER_ID}"
+          python scripts/oke-access.py configure --directory "$RUNNER_TEMP/personal-os-deploy"
+      - name: Temporarily allow only this runner to reach the OKE API
+        if: steps.source.outputs.current == 'true'
+        run: |
+          args=(--cluster-id "$OKE_CLUSTER_ID" --owner "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --state-file "$OKE_ACCESS_STATE")
+          if [[ -n "$OKE_ENDPOINT_NSG_ID" ]]; then args+=(--nsg-id "$OKE_ENDPOINT_NSG_ID"); fi
+          python scripts/oke-access.py open "${args[@]}"
+      - name: Connect to the selected OKE cluster
+        if: steps.source.outputs.current == 'true'
+        run: |
+          oci ce cluster create-kubeconfig --cluster-id "$OKE_CLUSTER_ID" --region "$OCI_REGION" --file "$KUBECONFIG" --token-version 2.0.0 --kube-endpoint PUBLIC_ENDPOINT
+          context="$(kubectl config current-context)"
+          echo "KUBE_CONTEXT=$context" >> "$GITHUB_ENV"
+          for attempt in {1..12}; do
+            if kubectl --context "$context" -n personal-os get deployment personal-os-api --request-timeout=10s >/dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "OKE is unreachable or this OCI user lacks Kubernetes deployment access." >&2
+          exit 1
+      - name: Deploy published digests and verify HTTPS
+        if: steps.source.outputs.current == 'true'
+        run: |
+          python scripts/deploy-release.py \
+            --release-file artifacts/release/release.json --source-sha "$SOURCE_SHA" \
+            --registry "$REGISTRY" --namespace "$OCI_NAMESPACE" --context "$KUBE_CONTEXT" \
+            --snapshot artifacts/deployment/previous-images.json
+      - name: Record successful deployment
+        if: steps.source.outputs.current == 'true'
+        run: |
+          {
+            echo '### Personal OS deployed and verified'
+            echo "Commit: $SOURCE_SHA"
+            echo 'URL: https://personal-os.tech'
+            echo 'Both rollouts and HTTPS smoke checks passed. Existing TLS/pull secrets and load balancer were reused.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary OKE API access
+        if: always() && steps.credentials.outcome == 'success'
+        run: python scripts/oke-access.py close --state-file "$OKE_ACCESS_STATE"
+      - name: Remove temporary OCI credentials
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          directory = Path(os.environ["RUNNER_TEMP"]) / "personal-os-deploy"
+          for name in ["api-key.pem", "oci-config", "kubeconfig"]:
+              (directory / name).unlink(missing_ok=True)
+          PY
+      - name: Save previous image digests for recovery
+        if: always() && steps.source.outputs.current == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deployment-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/deployment/
+          if-no-files-found: ignore
+          retention-days: 30

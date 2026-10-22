@@ -67,13 +67,71 @@ class Deployment:
         return next(item["image"] for item in deployment["spec"]["template"]["spec"]["containers"]
                     if item["name"] == container)
 
-    def patch(self, name, container, expected, desired, dry_run=False):
+    @staticmethod
+    def database_patch(deployment, container_patch):
+        pod = deployment["spec"]["template"]["spec"]
+        current = next(item for item in pod["containers"] if item["name"] == "api")
+        keys = ("JDBC_URL", "DB_USERNAME", "DB_PASSWORD")
+        for item in current.get("env", []):
+            if item["name"] in keys:
+                reference = item.get("valueFrom", {}).get("secretKeyRef", {})
+                if "value" in item or reference.get("name") != "database-credentials" or reference.get("key") != item["name"]:
+                    raise ValueError("Remove conflicting database environment overrides before using database-credentials")
+        for mount in current.get("volumeMounts", []):
+            if mount["mountPath"] == "/etc/database" and mount["name"] != "database-ca":
+                raise ValueError("The /etc/database mount is already used by another volume")
+        for volume in pod.get("volumes", []):
+            if volume["name"] == "database-ca" and volume.get("secret", {}).get("secretName") != "database-credentials":
+                raise ValueError("The database-ca volume is already used by another source")
+        container_patch["envFrom"] = [item for item in current.get("envFrom", [])
+                                      if item.get("secretRef", {}).get("name") != "database-credentials"]
+        # Explicit key references fail before startup if the Secret or any key is missing.
+        # The deployer needs no read access to Secret data; kubelet resolves these keys.
+        container_patch["env"] = [{"name": key, "valueFrom": {"secretKeyRef": {
+            "name": "database-credentials", "key": key, "optional": False}}} for key in keys]
+        container_patch["volumeMounts"] = [{"name": "database-ca", "mountPath": "/etc/database", "readOnly": True}]
+        return [{"name": "database-ca", "secret": {
+            "secretName": "database-credentials", "optional": False,
+            "items": [{"key": "DB_SSL_ROOT_CERT", "path": "root.crt"}]}}]
+
+    @staticmethod
+    def database_snapshot(deployment):
+        pod = deployment["spec"]["template"]["spec"]
+        api = next(item for item in pod["containers"] if item["name"] == "api")
+        return {
+            "env": [item for item in api.get("env", []) if item["name"] in {"JDBC_URL", "DB_USERNAME", "DB_PASSWORD"}],
+            "envFrom": [item for item in api.get("envFrom", []) if item.get("secretRef", {}).get("name") == "database-credentials"],
+            "volumeMounts": [item for item in api.get("volumeMounts", []) if item["mountPath"] == "/etc/database"],
+            "volumes": [item for item in pod.get("volumes", []) if item["name"] == "database-ca"],
+        }
+
+    @staticmethod
+    def restore_database_patch(deployment, container_patch, snapshot):
+        pod = deployment["spec"]["template"]["spec"]
+        api = next(item for item in pod["containers"] if item["name"] == "api")
+        previous = {item["name"]: item for item in snapshot["env"]}
+        container_patch["env"] = [previous.get(key, {"name": key, "$patch": "delete"})
+                                  for key in ("JDBC_URL", "DB_USERNAME", "DB_PASSWORD")]
+        container_patch["envFrom"] = [item for item in api.get("envFrom", [])
+                                      if item.get("secretRef", {}).get("name") != "database-credentials"] + snapshot["envFrom"]
+        container_patch["volumeMounts"] = snapshot["volumeMounts"] or [{"mountPath": "/etc/database", "$patch": "delete"}]
+        return snapshot["volumes"] or [{"name": "database-ca", "$patch": "delete"}]
+
+    def rollback(self, name, container, expected, desired, database_snapshot):
+        self.patch(name, container, expected, desired, database_restore=database_snapshot)
+
+    def patch(self, name, container, expected, desired, dry_run=False, database_restore=None):
         deployment = self.get(name)
         if self.image(deployment, container) != expected:
             raise RuntimeError(f"{name} changed outside this deployment; refusing to overwrite it")
+        container_patch = {"name": container, "image": desired}
+        pod_patch = {"containers": [container_patch]}
+        if (name, container) == COMPONENTS["api"]:
+            pod_patch["volumes"] = (self.database_patch(deployment, container_patch) if database_restore is None
+                                    else self.restore_database_patch(deployment, container_patch, database_restore))
         patch = {
             "metadata": {"resourceVersion": deployment["metadata"]["resourceVersion"]},
-            "spec": {"template": {"spec": {"containers": [{"name": container, "image": desired}]}}},
+            "spec": {"template": {"spec": pod_patch}},
         }
         args = ["patch", "deployment", name, "--type=strategic", "--patch-file=/dev/stdin"]
         if dry_run:
@@ -98,6 +156,8 @@ def promote(client, images, smoke, snapshot, dry_run=False):
         if deployment["spec"].get("replicas", 1) < 1:
             raise ValueError(f"{name} is scaled down; refusing to start it implicitly")
         previous[component] = client.image(deployment, container)
+        if component == "api":
+            database_snapshot = Deployment.database_snapshot(deployment)
     ip = client.load_balancer_ip()
     # Validate both patches server-side before changing either deployment.
     for component, (name, container) in COMPONENTS.items():
@@ -105,12 +165,12 @@ def promote(client, images, smoke, snapshot, dry_run=False):
     snapshot.parent.mkdir(parents=True, exist_ok=True)
     snapshot.write_text(json.dumps({"images": previous, "load_balancer_ip": ip}, indent=2) + "\n")
     if dry_run:
-        print("Both image updates passed server-side dry run; no resources changed.")
+        print("Database configuration and both image updates passed server-side dry run; no resources changed.")
         return
     changed = []
     try:
         for component, (name, container) in COMPONENTS.items():
-            if previous[component] != images[component]:
+            if component == "api" or previous[component] != images[component]:
                 # Record intent before patch: an API timeout may hide a successful mutation.
                 changed.append(component)
                 print(f"Updating {name}; waiting before starting the next component.", flush=True)
@@ -135,7 +195,10 @@ def promote(client, images, smoke, snapshot, dry_run=False):
             try:
                 current = client.image(client.get(name), container)
                 if current == images[component]:
-                    client.patch(name, container, current, previous[component])
+                    if component == "api":
+                        client.rollback(name, container, current, previous[component], database_snapshot)
+                    else:
+                        client.patch(name, container, current, previous[component])
                     client.rollout(name, seconds=180)
                 elif current != previous[component]:
                     raise RuntimeError("Deployment changed externally; rollback left it untouched")

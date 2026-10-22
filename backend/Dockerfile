@@ -4,7 +4,8 @@ WORKDIR /workspace
 COPY pom.xml .
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp dependency:go-offline
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp verify
+# CI runs PostgreSQL integration tests before building; Docker builds have no daemon.
+RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app

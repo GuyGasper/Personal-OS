@@ -48,6 +48,9 @@ class FakeDeployment:
                 raise RuntimeError("Concurrent image update")
             current["image"] = desired
 
+    def rollback(self, name, container, expected, desired, database_snapshot):
+        self.patch(name, container, expected, desired)
+
     def rollout(self, name, seconds=300):
         image = self.deployments[name]["spec"]["template"]["spec"]["containers"][0]["image"]
         if name == self.fail_rollout and image in IMAGES.values():
@@ -178,9 +181,114 @@ class DeployReleaseTest(unittest.TestCase):
             client.patch("personal-os-api", "api", "api:old", IMAGES["api"])
         payload = json.loads(kubectl.call_args.kwargs["input_text"])
         self.assertEqual(payload["metadata"], {"resourceVersion": "1"})
-        self.assertEqual(payload["spec"]["template"]["spec"]["containers"], [{"name": "api", "image": IMAGES["api"]}])
+        pod = payload["spec"]["template"]["spec"]
+        self.assertEqual(len(pod["containers"]), 1)
+        api = pod["containers"][0]
+        self.assertEqual((api["name"], api["image"]), ("api", IMAGES["api"]))
+        self.assertEqual(api["envFrom"], [])
+        self.assertEqual(api["env"], [{"name": key, "valueFrom": {"secretKeyRef": {
+            "name": "database-credentials", "key": key, "optional": False}}}
+            for key in ("JDBC_URL", "DB_USERNAME", "DB_PASSWORD")])
+        self.assertEqual(api["volumeMounts"], [{"name": "database-ca", "mountPath": "/etc/database", "readOnly": True}])
+        self.assertEqual(pod["volumes"][0]["secret"]["items"], [{"key": "DB_SSL_ROOT_CERT", "path": "root.crt"}])
         self.assertNotIn("replicas", payload["spec"])
 
+
+    def test_database_configuration_preserves_other_environment_sources(self):
+        document = self.client.get("personal-os-api")
+        pod = document["spec"]["template"]["spec"]
+        pod["containers"][0]["envFrom"] = [
+            {"configMapRef": {"name": "application-settings"}},
+            {"secretRef": {"name": "database-credentials", "optional": True}}]
+        patch = {"name": "api"}
+        deploy.Deployment.database_patch(document, patch)
+        self.assertEqual(patch["envFrom"], [
+            {"configMapRef": {"name": "application-settings"}}])
+        # A subsequent promotion must accept the references installed by this one.
+        pod["containers"][0]["env"] = patch["env"]
+        deploy.Deployment.database_patch(document, {})
+        pod["volumes"] = [{"name": "database-ca", "emptyDir": {}}]
+        with self.assertRaisesRegex(ValueError, "another source"):
+            deploy.Deployment.database_patch(document, {})
+
+    def test_frontend_patch_does_not_receive_database_credentials(self):
+        client = deploy.Deployment("selected-context")
+        document = self.client.get("personal-os-frontend")
+        with patch.object(client, "get", return_value=document), patch.object(client, "kubectl") as kubectl:
+            client.patch("personal-os-frontend", "frontend", "frontend:old", IMAGES["frontend"])
+        payload = json.loads(kubectl.call_args.kwargs["input_text"])
+        self.assertEqual(payload["spec"]["template"]["spec"], {
+            "containers": [{"name": "frontend", "image": IMAGES["frontend"]}]})
+
+    def test_kubectl_targets_only_the_personal_os_namespace(self):
+        client = deploy.Deployment("shared-cluster-context")
+        with patch.object(deploy.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "{}"
+            client.kubectl("get", "deployment", "personal-os-api")
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--namespace") + 1], "personal-os")
+        self.assertEqual(command[command.index("--context") + 1], "shared-cluster-context")
+
+    def test_reads_the_personal_os_load_balancer_service(self):
+        client = deploy.Deployment("shared-cluster-context")
+        with patch.object(client, "kubectl", return_value=json.dumps({
+            "status": {"loadBalancer": {"ingress": [{"ip": "129.158.40.64"}]}}
+        })) as kubectl:
+            self.assertEqual(client.load_balancer_ip(), "129.158.40.64")
+        kubectl.assert_called_once_with("get", "service", "personal-os-web", "-o", "json")
+
+    def test_rejects_wedding_images_before_deploying(self):
+        path = self.path / "release.json"
+        path.write_text(json.dumps({"tag": SOURCE, "platform": "linux/arm64", **{
+            name + "_image": value.replace("/personal-os/", "/sg-wedding/")
+            for name, value in IMAGES.items()
+        }}))
+        with self.assertRaisesRegex(ValueError, "private api repository"):
+            deploy.release_images(path, SOURCE, "iad.ocir.io", "tenancy")
+
+    def test_rejects_conflicting_database_environment_and_mounts(self):
+        document = self.client.get("personal-os-api")
+        api = document["spec"]["template"]["spec"]["containers"][0]
+        api["env"] = [{"name": "JDBC_URL", "value": "conflicting-connection"}]
+        with self.assertRaisesRegex(ValueError, "conflicting database"):
+            deploy.Deployment.database_patch(document, {})
+        del api["env"]
+        api["volumeMounts"] = [{"name": "other", "mountPath": "/etc/database"}]
+        with self.assertRaisesRegex(ValueError, "another volume"):
+            deploy.Deployment.database_patch(document, {})
+
+    def test_rollback_removes_new_requirements_when_secret_keys_are_missing(self):
+        client = deploy.Deployment("selected-context")
+        document = self.client.get("personal-os-api")
+        snapshot = client.database_snapshot(document)
+        pod = document["spec"]["template"]["spec"]
+        api = pod["containers"][0]
+        api["image"] = IMAGES["api"]
+        api["envFrom"] = [{"configMapRef": {"name": "keep-other-settings"}}]
+        with patch.object(client, "get", return_value=document), patch.object(client, "kubectl") as kubectl:
+            client.rollback("personal-os-api", "api", IMAGES["api"], "api:old", snapshot)
+        restored = json.loads(kubectl.call_args.kwargs["input_text"])["spec"]["template"]["spec"]
+        self.assertEqual(restored["containers"][0]["image"], "api:old")
+        self.assertEqual(restored["volumes"], [{"name": "database-ca", "$patch": "delete"}])
+        restored_api = restored["containers"][0]
+        self.assertEqual(restored_api["envFrom"], api["envFrom"])
+        self.assertTrue(all(item["$patch"] == "delete" for item in restored_api["env"]))
+        self.assertEqual(restored_api["volumeMounts"], [{"mountPath": "/etc/database", "$patch": "delete"}])
+
+    def test_rollback_restores_existing_database_configuration(self):
+        document = self.client.get("personal-os-api")
+        pod = document["spec"]["template"]["spec"]
+        api = pod["containers"][0]
+        api["envFrom"] = [{"secretRef": {"name": "database-credentials", "optional": True}}]
+        api["volumeMounts"] = [{"name": "database-ca", "mountPath": "/etc/database", "readOnly": True}]
+        pod["volumes"] = [{"name": "database-ca", "secret": {"secretName": "database-credentials", "optional": True}}]
+        snapshot = deploy.Deployment.database_snapshot(document)
+        restored = {}
+        volumes = deploy.Deployment.restore_database_patch(document, restored, snapshot)
+        self.assertEqual(restored["envFrom"], api["envFrom"])
+        self.assertEqual(restored["volumeMounts"], api["volumeMounts"])
+        self.assertEqual(volumes, pod["volumes"])
 
 if __name__ == "__main__":
     unittest.main()

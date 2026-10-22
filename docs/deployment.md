@@ -7,7 +7,8 @@ A manual run with publish unchecked only verifies the application.
 
 The deployment job consumes the immutable image digests published by that same
 run. It does not rebuild images or apply infrastructure manifests. It patches the
-API image and waits for its rollout to complete before patching and waiting for
+API image together with required database Secret key references and a read-only
+CA mount, then waits for its rollout to complete before patching and waiting for
 the frontend. It then tests HTTPS against the existing load balancer for both
 domains. Both images still come from the same verified release.
 
@@ -35,6 +36,11 @@ The API signing key authenticates OCI requests. The OCIR auth token publishes
 images. The TLS private key handles HTTPS at the load balancer. These are separate
 credentials. The TLS key and kubeconfig do not need to be uploaded to GitHub.
 The existing `personal-os-tls` and `ocir-pull` Kubernetes secrets are reused.
+The `personal-os` namespace must also contain `database-credentials`, installed by
+infrastructure's `scripts/install-postgres-secrets.py`. It supplies `JDBC_URL`,
+`DB_USERNAME`, `DB_PASSWORD`, and `DB_SSL_ROOT_CERT`. The production JDBC URL must
+use `sslmode=verify-full&sslrootcert=/etc/database/root.crt`. The deployer never
+fetches Secret values; required key references are resolved by Kubernetes.
 
 Keep the production environment restricted to `main`. Protect main and review
 workflow changes because production credentials are available to its jobs.
@@ -90,7 +96,11 @@ run's rule if immediate cleanup is needed. Cleanup failure makes the job fail.
 Production deployment jobs run one at a time. Before deployment, a run checks
 that its commit is still the head of main and skips an obsolete release.
 
-Both image patches must pass a server-side dry run before either is applied.
+Both image patches, including the API's database references and CA volume, must
+pass a server-side dry run before either is applied. Kubernetes requires all
+referenced database keys and the CA file before starting the API. Flyway migrates
+the application-owned `personal_os` schema before startup finishes, and readiness
+requires a working database. Liveness remains independent of PostgreSQL.
 The job records the previous images in the `deployment-<sha>-<attempt>` artifact,
 then updates only the named application containers. The API must finish its
 rollout before the frontend image is changed. If the API rollout fails, the
@@ -109,7 +119,11 @@ must also be applied from the infrastructure configuration before the image
 deployment runs; updating the source manifest alone does not change the cluster.
 
 If patching, rollout, or HTTPS verification fails, the script attempts to restore
-both previous image references and waits for recovery. The job still fails so
+both previous image references and waits for recovery. API rollback also restores
+the previous database references and CA mount, so unavailable Secret keys do not
+leave new requirements on the previous version. These prior references are held
+in memory during the run, without logging or saving credential values. Database
+migrations are not undone; future changes must support the previous API version. The job still fails so
 the failed release is visible in Actions. If someone changed an image outside
 this job, rollback leaves that change untouched and reports that manual attention
 is required. A runner forcibly terminated during deployment may also need manual

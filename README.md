@@ -4,8 +4,8 @@ A personal operating system for budgeting, running, and network calculations.
 
 This first release provides a React + TypeScript landing page, a Java 21 / Spring
 Boot API, and a live browser-to-API connection check. The three feature areas are
-marked **Planned**. There is no database, personal data capture, or authentication
-in this release.
+marked **Planned**. The API connects to private PostgreSQL with Flyway migrations;
+feature data models, personal data capture, and authentication are still planned.
 
 ## Layout and request flow
 
@@ -36,10 +36,20 @@ docker compose up --build
 docker compose down
 ```
 
-Compose uses the host's architecture. For hot reload, install Java 21, Maven 3.9+,
-and Node 24, then use two terminals:
+Compose uses the host's architecture and starts PostgreSQL 16 with a named data volume.
+Only localhost can reach its port 5434. `docker compose down` retains local data;
+add `--volumes` only to reset this disposable database. Checked-in passwords are
+local test fixtures and are unrelated to production credentials.
+
+For hot reload, install Java 21, Maven 3.9+, and Node 24, then start the local
+database and use two terminals:
 
 ```bash
+docker compose up -d --wait database
+# Disposable local credentials only; production uses Kubernetes Secrets.
+export JDBC_URL='jdbc:postgresql://localhost:5434/personal_os'
+export DB_USERNAME=personal_os
+export DB_PASSWORD=local-personal-os-only
 mvn -f backend/pom.xml spring-boot:run
 ```
 
@@ -57,12 +67,12 @@ npm run dev
 | `GET /api/status` | Service name, UP status, version, UTC time, and planned modules |
 | `GET /api`, `GET /api/` | Same status response |
 | `GET /health/live` | Kubernetes liveness; independent of external systems |
-| `GET /health/ready` | Kubernetes readiness; 503 when refusing traffic |
+| `GET /health/ready` | Kubernetes readiness; 503 when refusing traffic or the database is unavailable |
 
 Health groups use Spring Boot's availability lifecycle. They are accessed directly
 by Kubernetes, outside the Nginx `/api/` proxy. Only status-only health information
-is exposed; environment and management endpoints are disabled. Future databases
-can be added explicitly to the `ready` health group without affecting liveness.
+is exposed; environment and management endpoints are disabled. The `ready` group
+also checks PostgreSQL; `live` remains independent of the database.
 `APP_VERSION` can override the API's default `0.1.0`.
 
 ## Build and test
@@ -74,9 +84,45 @@ npm ci
 npm run build
 ```
 
-Backend tests use real HTTP requests and verify the API contract, management
-endpoint exclusion, 404s, and the readiness transition while liveness stays
-healthy.
+Backend tests require Docker and start disposable PostgreSQL containers with
+Testcontainers. They verify real application-role migrations and writes, schema
+ownership, preservation of the infrastructure restore probe, repeat migration
+safety, the HTTP API contract, and readiness/liveness behavior during a database
+outage and recovery. Container builds package the API; CI runs `mvn verify`
+separately before building either image.
+
+## PostgreSQL
+
+Production uses the private shared PostgreSQL VM's `personal_os` database and
+ordinary `personal_os` login. The `database-credentials` Secret must already be
+installed in the `personal-os` namespace using the infrastructure repository's
+`scripts/install-postgres-secrets.py`. No production database passwords are needed
+in GitHub settings or committed files.
+
+| Secret key | Purpose |
+| --- | --- |
+| `JDBC_URL` | Private JDBC URL with `sslmode=verify-full&sslrootcert=/etc/database/root.crt` |
+| `DB_USERNAME` | `personal_os` |
+| `DB_PASSWORD` | Generated application-role password |
+| `DB_SSL_ROOT_CERT` | PostgreSQL CA mounted read-only at `/etc/database/root.crt` |
+
+The API reads required individual Secret keys; Kubernetes resolves them without
+giving the deployment identity access to credential values. Missing keys or the
+CA prevent container startup. Invalid credentials, TLS verification failures, or
+failed migrations prevent the API from becoming ready, and deployment rolls back.
+The normal pipeline patches these references and the CA mount with the API image.
+
+Flyway creates and migrates the application-owned `personal_os` schema on startup.
+It preserves `public.infrastructure_restore_probe`, used by infrastructure backup
+checks. V1 initializes the schema and its migration history; budgeting, running,
+and network feature tables will be added with their features. Application queries
+use this schema by default, with a pool capped at five connections per API replica.
+
+Add future migrations under `backend/src/main/resources/db/migration` using names
+such as `V2__description.sql`. Never edit an applied migration or enable Flyway
+clean/baseline against production. Image rollback does not reverse migrations, so
+new migrations must remain compatible with the previous API version. Backups and
+restores remain managed by shared infrastructure.
 
 ## GitHub Actions CI/CD
 
@@ -84,7 +130,7 @@ The **CI / CD** workflow runs on pushes, pull requests, and manual dispatches.
 It calls one shared verification workflow on `ubuntu-24.04-arm`, matching the
 OKE workers' architecture:
 
-1. Compile Java 21 and run the API HTTP/lifecycle tests.
+1. Compile Java 21 and run the PostgreSQL migration and API HTTP/lifecycle tests.
 2. Install locked frontend dependencies, type-check, and build React.
 3. Validate scripts and run publication, deployment/rollback, and network-access tests.
 4. Build both native `linux/arm64` container images.
@@ -100,7 +146,8 @@ them to the existing private OCIR repositories. It does not rebuild after testin
 Pull requests and other branches run verification without registry credentials.
 A failed verification prevents publication and deployment. After publication, the
 deployment job temporarily permits the runner's own IP to reach OKE, updates both
-application image digests in order (API rollout, then frontend rollout), verifies
+application image digests in order (API rollout, then frontend rollout), wires the
+API to its database Secret and CA mount, verifies
 HTTPS, and removes the temporary rule. Failed rollout or HTTPS checks trigger restoration of the previous
 images.
 

@@ -1,6 +1,28 @@
 services:
+  database:
+    image: postgres:16.15-bookworm
+    environment:
+      POSTGRES_DB: personal_os
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-admin-only
+    ports: ["127.0.0.1:5434:5432"]
+    volumes:
+      - personal_os-postgres:/var/lib/postgresql/data
+      - ./backend/src/test/resources/database-test-init.sql:/docker-entrypoint-initdb.d/01-personal_os.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d personal_os"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
   personal-os-api:
     build: ./backend
+    environment:
+      JDBC_URL: jdbc:postgresql://database:5432/personal_os
+      DB_USERNAME: personal_os
+      DB_PASSWORD: local-personal-os-only
+    depends_on:
+      database:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp:uid=10001,gid=10001,mode=1777
@@ -19,3 +41,6 @@ services:
       - "127.0.0.1:8080:8080"
     depends_on:
       - personal-os-api
+
+volumes:
+  personal_os-postgres:

@@ -138,6 +138,29 @@ class Deployment:
             args.append("--dry-run=server")
         self.kubectl(*args, input_text=json.dumps(patch))
 
+    def cronjob(self):
+        return json.loads(self.kubectl("get", "cronjob", "personal-os-strava-sync", "-o", "json"))
+
+    @staticmethod
+    def cronjob_image(document):
+        containers = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"]
+        return next(item["image"] for item in containers if item["name"] == "strava-sync")
+
+    def patch_cronjob(self, expected, desired, dry_run=False):
+        document = self.cronjob()
+        if self.cronjob_image(document) != expected:
+            raise RuntimeError("Strava CronJob changed externally; refusing to overwrite it")
+        patch = {
+            "metadata": {"resourceVersion": document["metadata"]["resourceVersion"]},
+            "spec": {"jobTemplate": {"spec": {"template": {"spec": {
+                "containers": [{"name": "strava-sync", "image": desired}]
+            }}}}},
+        }
+        args = ["patch", "cronjob", "personal-os-strava-sync", "--type=strategic", "--patch-file=/dev/stdin"]
+        if dry_run:
+            args.append("--dry-run=server")
+        self.kubectl(*args, input_text=json.dumps(patch))
+
     def rollout(self, name, seconds=300):
         self.kubectl("rollout", "status", "deployment/" + name, f"--timeout={seconds}s", capture=False)
 
@@ -149,7 +172,7 @@ class Deployment:
         return addresses[0]["ip"]
 
 
-def promote(client, images, smoke, snapshot, dry_run=False):
+def promote(client, images, smoke, snapshot, dry_run=False, manage_strava=False):
     previous = {}
     for component, (name, container) in COMPONENTS.items():
         deployment = client.get(name)
@@ -162,12 +185,17 @@ def promote(client, images, smoke, snapshot, dry_run=False):
     # Validate both patches server-side before changing either deployment.
     for component, (name, container) in COMPONENTS.items():
         client.patch(name, container, previous[component], images[component], dry_run=True)
+    previous_worker = None
+    if manage_strava:
+        previous_worker = Deployment.cronjob_image(client.cronjob())
+        client.patch_cronjob(previous_worker, images["api"], dry_run=True)
     snapshot.parent.mkdir(parents=True, exist_ok=True)
-    snapshot.write_text(json.dumps({"images": previous, "load_balancer_ip": ip}, indent=2) + "\n")
+    snapshot.write_text(json.dumps({"images": previous, "strava_sync_image": previous_worker, "load_balancer_ip": ip}, indent=2) + "\n")
     if dry_run:
         print("Database configuration and both image updates passed server-side dry run; no resources changed.")
         return
     changed = []
+    worker_changed = False
     try:
         for component, (name, container) in COMPONENTS.items():
             if component == "api" or previous[component] != images[component]:
@@ -187,9 +215,21 @@ def promote(client, images, smoke, snapshot, dry_run=False):
                 if attempt == 2:
                     raise
                 time.sleep(5)
+        if manage_strava and previous_worker != images["api"]:
+            worker_changed = True
+            client.patch_cronjob(previous_worker, images["api"])
         print("Deployment verified: both published digests are ready and HTTPS checks passed.")
     except BaseException:
         failures = []
+        if worker_changed:
+            try:
+                current = Deployment.cronjob_image(client.cronjob())
+                if current == images["api"]:
+                    client.patch_cronjob(current, previous_worker)
+                elif current != previous_worker:
+                    raise RuntimeError("Strava CronJob changed externally; rollback left it untouched")
+            except Exception as error:
+                failures.append(f"personal-os-strava-sync: {error}")
         for component in reversed(changed):
             name, container = COMPONENTS[component]
             try:
@@ -221,6 +261,8 @@ def main():
     parser.add_argument("--snapshot", type=Path, default=Path(".local/previous-images.json"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check-source", action="store_true")
+    parser.add_argument("--strava-sync", action="store_true",
+                        help="Also promote the installed Strava CronJob after API/HTTPS verification")
     args = parser.parse_args()
     try:
         if args.check_source:
@@ -234,7 +276,7 @@ def main():
         images = release_images(args.release_file, args.source_sha, args.registry, args.namespace)
         def smoke(ip):
             subprocess.run(["bash", str(Path(__file__).with_name("smoke-test.sh")), ip], check=True, timeout=180)
-        promote(Deployment(args.context), images, smoke, args.snapshot, args.dry_run)
+        promote(Deployment(args.context), images, smoke, args.snapshot, args.dry_run, args.strava_sync)
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"{error}\n")
 

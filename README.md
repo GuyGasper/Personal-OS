@@ -4,8 +4,11 @@ A personal operating system for budgeting, running, and network calculations.
 
 This first release provides a React + TypeScript landing page, a Java 21 / Spring
 Boot API, and a live browser-to-API connection check. The three feature areas are
-marked **Planned**. The API connects to private PostgreSQL with Flyway migrations;
-feature data models, personal data capture, and authentication are still planned.
+marked **Planned** in the UI. The API connects to private PostgreSQL with Flyway
+migrations. A single-athlete Strava backend now imports activity summaries through
+an opt-in hourly OKE job and serves private database-backed read endpoints.
+See [Strava setup and operations](docs/strava.md). The running UI and application
+login are still planned.
 
 ## Layout and request flow
 
@@ -66,6 +69,8 @@ npm run dev
 | --- | --- |
 | `GET /api/status` | Service name, UP status, version, UTC time, and planned modules |
 | `GET /api`, `GET /api/` | Same status response |
+| `GET /api/strava/activities` | Private, paginated locally stored Strava activities |
+| `GET /api/strava/sync` | Private sync timestamps, activity count and safe error codes |
 | `GET /health/live` | Kubernetes liveness; independent of external systems |
 | `GET /health/ready` | Kubernetes readiness; 503 when refusing traffic or the database is unavailable |
 
@@ -114,8 +119,9 @@ The normal pipeline patches these references and the CA mount with the API image
 
 Flyway creates and migrates the application-owned `personal_os` schema on startup.
 It preserves `public.infrastructure_restore_probe`, used by infrastructure backup
-checks. V1 initializes the schema and its migration history; budgeting, running,
-and network feature tables will be added with their features. Application queries
+checks. V1 initializes the schema and its migration history; V2 adds Strava
+activities and encrypted sync credentials. Budgeting and network feature tables
+will be added with their features. Application queries
 use this schema by default, with a pool capped at five connections per API replica.
 
 Add future migrations under `backend/src/main/resources/db/migration` using names

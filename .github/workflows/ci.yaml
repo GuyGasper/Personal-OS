@@ -100,6 +100,7 @@ jobs:
     env:
       OCI_REGION: ${{ vars.OCI_REGION }}
       OKE_CLUSTER_ID: ${{ vars.OKE_CLUSTER_ID }}
+      STRAVA_SYNC_ENABLED: ${{ vars.STRAVA_SYNC_ENABLED }}
       OKE_ENDPOINT_NSG_ID: ${{ vars.OKE_ENDPOINT_NSG_ID }}
       REGISTRY: ${{ vars.OCIR_REGISTRY }}
       OCI_NAMESPACE: ${{ vars.OCI_NAMESPACE }}
@@ -169,7 +170,9 @@ jobs:
       - name: Deploy published digests and verify HTTPS
         if: steps.source.outputs.current == 'true'
         run: |
-          python scripts/deploy-release.py \
+          args=()
+          if [[ "$STRAVA_SYNC_ENABLED" == "true" ]]; then args+=(--strava-sync); fi
+          python scripts/deploy-release.py "${args[@]}" \
             --release-file artifacts/release/release.json --source-sha "$SOURCE_SHA" \
             --registry "$REGISTRY" --namespace "$OCI_NAMESPACE" --context "$KUBE_CONTEXT" \
             --snapshot artifacts/deployment/previous-images.json

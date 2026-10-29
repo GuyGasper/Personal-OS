@@ -153,3 +153,17 @@ python3 scripts/deploy-release.py \
 Removing `--dry-run` deploys that release and runs the HTTPS checks.
 `scripts/deploy.sh` remains the bootstrap path for namespace, secrets, and
 infrastructure manifests; routine application releases use the new job.
+
+## Optional Strava worker
+
+The hourly single-athlete worker uses the API image and the existing private
+PostgreSQL database. [Strava setup](strava.md) covers OAuth, encrypted token
+storage, private read endpoints, webhook registration and enabling its suspended
+CronJob. The authoritative manifest is in the infrastructure repository.
+
+After installing the CronJob and applying the expanded `deployer-role.yaml`,
+set production variable `STRAVA_SYNC_ENABLED=true`. Deployments then preflight
+the named CronJob image patch and update it to the tested API digest after the
+application rollouts and HTTPS checks. The prior worker image is included in the
+recovery artifact. Patch failures restore it alongside application images;
+existing schedules, suspension, secrets and running Jobs are preserved.

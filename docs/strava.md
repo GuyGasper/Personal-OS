@@ -49,12 +49,15 @@ Register your Strava app with its callback domain set to `localhost`. Run from
 the application repository with Python 3; IDs are public identifiers:
 
 ```bash
-python3 scripts/strava-authorize.py --client-id '<app-id>' --athlete-id '<your-athlete-id>'
+python3 scripts/strava-authorize.py --client-id '<app-id>'
 ```
 
 The helper prompts for the client secret, prints the consent URL, then prompts
-for the complete callback URL. It validates OAuth state, the callback destination,
-`activity:read_all` scope and the authorized athlete. No callback server is needed:
+for the complete callback URL. It validates OAuth state, the callback destination
+and `activity:read_all` scope, then discovers your numeric athlete ID from Strava's
+OAuth response. You do not need to find the ID or resolve a vanity username.
+Optionally pass `--athlete-id '<numeric-id>'` to verify the authorized account.
+No callback server is needed:
 copy the URL from the browser even if the localhost page cannot load.
 
 It creates ignored, owner-only files under `.local/strava/`:
@@ -119,7 +122,7 @@ pair, following [deployment](deployment.md) and
 The authoritative new manifest is
 `OCI-Infrastructure/kubernetes/personal-os/strava-sync.yaml`.
 Kustomize substitutes the API image for both the Deployment and CronJob.
-The CronJob initially stays suspended and runs at minute 17 of each hour (UTC).
+The CronJob initially stays suspended and runs at minute 0 of each hour (UTC).
 The API manifest adds optional references to the private read/webhook keys.
 When updating an existing Secret, restart the API to reload its environment:
 

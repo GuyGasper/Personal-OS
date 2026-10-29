@@ -18,6 +18,20 @@ class StravaAuthorizeTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 authorize.authorization_code(invalid, "http://localhost/strava/callback", "expected")
 
+    def test_discovers_numeric_athlete_id_and_checks_it_when_requested(self):
+        tokens = {"athlete": {"id": 42}}
+        self.assertEqual(authorize.authorized_athlete_id(tokens), 42)
+        self.assertEqual(authorize.authorized_athlete_id(tokens, 42), 42)
+        with self.assertRaises(ValueError):
+            authorize.authorized_athlete_id(tokens, 99)
+
+    def test_rejects_missing_or_invalid_athlete_ids(self):
+        for value in (None, "guy_gasper", "42", 0, -1, True):
+            with self.assertRaises(ValueError):
+                authorize.authorized_athlete_id({"athlete": {"id": value}})
+        with self.assertRaises(ValueError):
+            authorize.authorized_athlete_id({})
+
     def test_private_files_are_never_overwritten_and_reject_line_injection(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sync.env"

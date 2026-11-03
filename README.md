@@ -2,13 +2,14 @@
 
 A personal operating system for budgeting, running, and network calculations.
 
-This first release provides a React + TypeScript landing page, a Java 21 / Spring
-Boot API, and a live browser-to-API connection check. The three feature areas are
-marked **Planned** in the UI. The API connects to private PostgreSQL with Flyway
+The app provides a React + TypeScript workspace and a Java 21 / Spring Boot API.
+The Running (02) card opens a rolling 365-day cumulative mileage graph backed by
+imported Strava runs. Budgeting and Network remain planned. The API connects to private PostgreSQL with Flyway
 migrations. A single-athlete Strava backend now imports activity summaries through
 an opt-in hourly OKE job and serves private database-backed read endpoints.
-See [Strava setup and operations](docs/strava.md). The running UI and application
-login are still planned.
+See [Strava setup and operations](docs/strava.md). The public running graph loads
+automatically from stored daily mileage. Detailed activities and sync status remain
+protected by a server-configured token; application login is still planned.
 
 ## Layout and request flow
 
@@ -69,6 +70,7 @@ npm run dev
 | --- | --- |
 | `GET /api/status` | Service name, UP status, version, UTC time, and planned modules |
 | `GET /api`, `GET /api/` | Same status response |
+| `GET /api/running/mileage?timezone=America/Chicago` | Public daily running distances for the last 365 local days |
 | `GET /api/strava/activities` | Private, paginated locally stored Strava activities |
 | `GET /api/strava/sync` | Private sync timestamps, activity count and safe error codes |
 | `GET /health/live` | Kubernetes liveness; independent of external systems |
@@ -143,7 +145,8 @@ OKE workers' architecture:
 5. Start the containers with read-only filesystems. Check API liveness/readiness,
    Nginx health, API proxying, static JavaScript, client routes, and API 404s.
 6. Run Playwright against those containers in desktop and mobile Chromium:
-   connection, retry, client routes, failure recovery, and invalid responses.
+   workspace/running navigation, automatic mileage loading, rolling totals, private API protection,
+   failure recovery, and invalid responses.
 
 On a successful push to **main**, publishing runs automatically in the
 `production` environment. It loads the exact images tested above, checks their

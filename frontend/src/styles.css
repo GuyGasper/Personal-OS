@@ -20,6 +20,7 @@ h1, h2, h3, p { margin: 0; }
 .header { display: flex; align-items: center; justify-content: space-between; height: 112px; border-bottom: 1px solid #e3e7de; }
 .brand { display: flex; align-items: center; gap: 12px; font-family: Manrope, sans-serif; font-size: 21px; font-weight: 800; letter-spacing: -.8px; }
 .brand-mark { display: grid; place-items: center; background: #213e30; border-radius: 10px; color: #f6f8ee; width: 36px; height: 36px; font-size: 26px; line-height: 1; padding-bottom: 4px; }
+.workspace { margin-bottom: 56px; }
 .header-link { font-size: 13px; color: #59675c; display: flex; gap: 20px; }
 .hero { padding: 78px 0 70px; }
 .eyebrow { font-size: 10px; letter-spacing: 2px; font-weight: 700; color: #60735f; display: flex; align-items: center; gap: 10px; }
@@ -45,25 +46,6 @@ h1 span { color: #7a8b70; }
 .module-footer { border-top: 1px solid #edf0e8; margin-top: 22px; padding: 17px 0; display: flex; align-items: center; gap: 6px; font-size: 10px; color: #67765b; }
 .planned-dot { height: 4px; width: 4px; background: #94a47f; border-radius: 50%; }
 .module-footer > span:last-child { margin-left: auto; color: #6e7a60; font-size: 17px; }
-.system { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 70px; margin: 64px 0 56px; padding: 36px; background: #eef2e8; border: 1px solid #e1e7d9; border-radius: 12px; }
-.system-intro .eyebrow { font-size: 9px; letter-spacing: 1.5px; }
-.system-intro h2 { font-family: Manrope, sans-serif; font-size: 23px; letter-spacing: -.8px; margin: 14px 0 12px; font-weight: 650; }
-.system-intro p { font-size: 12px; color: #66745c; line-height: 1.9; max-width: 305px; }
-.connection-panel { background: #fffefb; border: 1px solid #dce4d3; border-radius: 8px; padding: 20px; }
-.connection-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.connection-top h3 { font-size: 12px; font-weight: 600; }
-.status-pill { display: flex; align-items: center; gap: 5px; border-radius: 20px; padding: 5px 8px; font-size: 10px; background: #eef1e9; color: #58664b; }
-.status-pill > span { width: 4px; height: 4px; background: currentColor; border-radius: 50%; }
-.status-pill.connected { background: #edf5e7; color: #496b31; }
-.status-pill.unavailable { background: #f9ebe4; color: #914c28; }
-.connection-details { padding: 14px 0; min-height: 91px; }
-.connection-details > p { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; line-height: 2; color: #6d785f; }
-.connection-details > p > span { color: #536448; text-align: right; }
-.connection-details .connection-message { font-size: 11px; line-height: 1.7; }
-.connection-panel button { width: 100%; border: 1px solid #dfe6d7; background: #fafbf6; border-radius: 5px; padding: 8px; color: #52674a; font-size: 11px; cursor: pointer; }
-.connection-panel button:hover { background: #edf2e6; }
-.connection-panel button:disabled { opacity: .6; cursor: wait; }
-.connection-panel button span { font-size: 13px; margin-right: 5px; }
 footer { border-top: 1px solid #e3e7de; padding: 24px 0 35px; display: flex; justify-content: space-between; gap: 24px; color: #68755c; font-size: 10px; }
 .footer-divider { margin: 0 10px; color: #909d82; }
 footer > span:last-child { font-size: 8px; letter-spacing: 1.4px; }
@@ -78,8 +60,6 @@ footer > span:last-child { font-size: 8px; letter-spacing: 1.4px; }
   .module-grid { gap: 12px; }
   .module { padding: 20px 18px 0; }
   .module-description { min-height: 86px; }
-  .system { gap: 25px; padding: 28px; }
-  .system-intro h2 { font-size: 21px; }
 }
 @media (max-width: 620px) {
   .shell { padding: 0 22px; }
@@ -97,7 +77,61 @@ footer > span:last-child { font-size: 8px; letter-spacing: 1.4px; }
   .module-top { margin-bottom: 18px; }
   .module-description { min-height: 0; max-width: none; }
   .module-footer { margin-top: 22px; }
-  .system { grid-template-columns: 1fr; margin: 36px 0; padding: 24px; gap: 24px; }
-  .system-intro p { max-width: none; }
   footer { line-height: 1.8; flex-direction: column; gap: 10px; }
+}
+
+.module-running { display: block; transition: border-color .15s, box-shadow .15s; }
+.module-running:hover { border-color: #bb9980; box-shadow: 0 4px 20px #aa77590d; }
+.running-page { padding-bottom: 56px; }
+.running-hero { padding-bottom: 44px; }
+.running-hero h1:focus { outline: none; }
+.running-hero h1 span { color: #aa7759; }
+.mileage-panel, .running-access { background: #fffefb; border: 1px solid #dfe5d9; border-radius: 12px; padding: 32px; }
+.mileage-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.mileage-heading .eyebrow { font-size: 9px; color: #99775f; }
+.mileage-heading h2 { font-family: Manrope, sans-serif; font-size: 21px; letter-spacing: -.7px; margin-top: 10px; }
+.period-pill { white-space: nowrap; border: 1px solid #eadfd3; background: #faf4ec; padding: 8px 12px; border-radius: 20px; font-size: 9px; letter-spacing: 1px; color: #99775f; }
+.mileage-summary { margin-top: 28px; }
+.mileage-summary strong { font-family: Manrope, sans-serif; font-size: 42px; font-weight: 650; letter-spacing: -1.5px; }
+.mileage-summary strong > span { font-size: 19px; color: #7a8b70; letter-spacing: 0; font-weight: 500; }
+.mileage-summary p { font-size: 12px; color: #697563; line-height: 1.9; margin-top: 6px; }
+.mileage-summary p > span { margin: 0 7px; }
+.mileage-chart { display: block; width: 100%; height: auto; margin: 22px 0 14px; overflow: visible; }
+.mileage-chart text { font-family: 'DM Sans', sans-serif; font-size: 12px; fill: #6e7865; }
+.mileage-chart .axis-title { font-size: 10px; letter-spacing: 1.2px; }
+.chart-grid { stroke: #e9ece2; stroke-width: 1; }
+.mileage-line { fill: none; stroke: #aa7759; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart-guide { stroke: #c5af9c; stroke-width: 1; stroke-dasharray: 4 5; }
+.day-inspector { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 1.8; }
+.day-inspector span { color: #697563; }
+.day-inspector output { white-space: nowrap; }
+.day-slider { display: block; width: 100%; margin: 12px 0 16px; accent-color: #aa7759; cursor: pointer; min-height: 24px; }
+.mileage-note { border-top: 1px solid #edf0e8; padding-top: 16px; color: #697563; font-size: 11px; line-height: 1.8; }
+.running-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 18px; color: #697563; font-size: 11px; line-height: 1.8; }
+.running-actions > div { display: flex; gap: 16px; }
+.text-button { color: #60735f; background: transparent; border: 0; padding: 4px 0; cursor: pointer; font-size: 11px; }
+.text-button:hover { text-decoration: underline; }
+.running-access { max-width: 650px; }
+.running-access > .module-icon { background: #f9eee5; color: #aa7759; margin-bottom: 22px; }
+.running-access h2 { font-family: Manrope, sans-serif; font-size: 23px; letter-spacing: -.8px; }
+.running-access p { margin-top: 14px; font-size: 13px; line-height: 1.9; color: #697563; }
+.primary-button { border: 0; border-radius: 6px; background: #213e30; color: #fffefb; padding: 12px 18px; font-size: 12px; cursor: pointer; }
+.retry-mileage { margin-top: 18px; }
+.running-access .running-error { color: #914c28; }
+input:focus-visible { outline: 3px solid #417b5a; outline-offset: 3px; }
+@media (max-width: 620px) {
+  .running-hero { padding-bottom: 32px; }
+  .mileage-panel, .running-access { padding: 22px 16px; }
+  .mileage-heading { align-items: flex-start; gap: 8px; }
+  .mileage-heading h2 { font-size: 18px; }
+  .mileage-heading .eyebrow { font-size: 8px; letter-spacing: 1.2px; }
+  .period-pill { font-size: 8px; letter-spacing: .5px; padding: 7px 8px; }
+  .mileage-summary strong { font-size: 36px; }
+  .mileage-chart { margin-top: 30px; }
+  .day-inspector { font-size: 11px; }
+  .running-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
+}
+@media (max-width: 620px) {
+  .mileage-chart text { font-size: 24px; }
+  .mileage-chart .axis-title { font-size: 20px; }
 }

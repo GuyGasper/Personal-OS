@@ -3,10 +3,11 @@
 The hourly OKE CronJob uses the existing API image in the `strava-sync` profile.
 It starts without an HTTP server, imports Strava activity summaries into the
 private PostgreSQL database, closes its connections and exits. The HTTP API only
-queries PostgreSQL. Frontend integration is a separate next step.
+queries PostgreSQL. The Running (02) workspace card opens `/running`, where the
+rolling mileage graph reads these imported summaries.
 
 ```text
-Strava OAuth/API → OKE CronJob → PostgreSQL → private read API → future running UI
+Strava OAuth/API → OKE CronJob → PostgreSQL → public daily mileage API → running UI
                       hourly       ↑
 Strava deauthorization webhook ────┘
 ```
@@ -67,11 +68,52 @@ It creates ignored, owner-only files under `.local/strava/`:
 | `sync.env` | `STRAVA_ATHLETE_ID`, `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN`, `STRAVA_TOKEN_ENCRYPTION_KEY` |
 | `api.env` | `STRAVA_READ_TOKEN`, `STRAVA_WEBHOOK_TOKEN` |
 
-The read and webhook tokens are independently generated high-entropy values.
-The API receives neither OAuth credentials nor the encryption key. Do not embed
-the read token in frontend source or a Vite environment variable; a future login
-flow should supply private API access. Keep bootstrap files and database backups
-private. The persisted DB refresh token supersedes the bootstrap seed.
+## Tokens and server configuration
+
+The public mileage graph needs no token, login, root `.env`, or frontend secret.
+It reads daily totals already stored in PostgreSQL. The remaining credentials
+serve the import worker, private read endpoints, and deauthorization webhook:
+
+| Credential | Purpose | Local storage | Production storage |
+| --- | --- | --- | --- |
+| `STRAVA_CLIENT_SECRET` and `STRAVA_REFRESH_TOKEN` | Authorize the worker to import from Strava; the refresh token is a bootstrap seed | `.local/strava/sync.env` | `strava-sync-credentials` Secret |
+| `STRAVA_TOKEN_ENCRYPTION_KEY` | Encrypt stored Strava access/refresh tokens | `.local/strava/sync.env` | `strava-sync-credentials` Secret |
+| `STRAVA_READ_TOKEN` | Personal OS Bearer credential for detailed activities and sync status; it is not a Strava OAuth token | `.local/strava/api.env` | `strava-api-credentials` Secret |
+| `STRAVA_WEBHOOK_TOKEN` | Shared secret for the deauthorization callback URL and verification | `.local/strava/api.env` | `strava-api-credentials` Secret |
+
+The authorization helper generates the read and webhook tokens independently.
+Retain the existing values when updating the running UI; no new token or manual
+UI entry is needed. The persisted database refresh token supersedes the bootstrap
+seed after rotation.
+
+For local Docker use, `compose.strava.yaml` loads `api.env` into the API and
+`sync.env` into the worker. The base `compose.yaml` does not load a root `.env`
+into the API container. When running Java directly, supply the required process
+environment variables; the application does not automatically import env files.
+In production, Kubernetes injects these values from the existing Secrets.
+
+The HTTP API receives neither Strava OAuth credentials nor the encryption key.
+The browser receives none of these credentials. Keep the generated files and
+database backups private; never put a token in frontend source, a `VITE_*`
+variable, or a browser URL. The private read token can be omitted if those read
+endpoints are unused; the public mileage graph still works. Keep the webhook
+credential configured for deauthorization handling.
+
+## View your running mileage
+
+Click **Running (02)** on the workspace, or open `/running`. The graph loads
+public daily running mileage automatically from PostgreSQL. It does not ask for
+a token, contact Strava, or download detailed activity records. Anyone who can
+reach the site can view these mileage totals.
+
+`GET /api/running/mileage?timezone=America/Chicago` returns exactly 365 daily
+records, including today, with only each date and its distance in meters. The
+server filters Run, TrailRun, and VirtualRun activities and handles local-day
+boundaries across daylight saving. The browser converts meters to miles and
+builds the cumulative line. Rest days keep the total steady. The day slider
+supports touch and keyboard inspection. **Refresh mileage** rereads imported data;
+the existing hourly job handles Strava sync.
+
 
 ## Local run
 
@@ -88,14 +130,17 @@ disposable PostgreSQL containers.
 
 ## API
 
-Supply `Authorization: Bearer <STRAVA_READ_TOKEN>` to both routes. They return
-`Cache-Control: no-store`, 401 for missing/invalid credentials, and 404 when
-the read token is unconfigured or shorter than 32 characters.
+The mileage endpoint is public. Supply `Authorization: Bearer <STRAVA_READ_TOKEN>`
+to the two private Strava read routes. All read responses use
+`Cache-Control: no-store`. Private routes return 401 for missing/invalid
+credentials, and 404 when the read token is unconfigured or shorter than 32
+characters. This does not affect the public mileage endpoint.
 
-| Route | Response |
-| --- | --- |
-| `GET /api/strava/activities?limit=50&offset=0` | `activities`, `total`, `limit`, `offset`; newest start date first, then descending ID |
-| `GET /api/strava/sync` | `configured`, `authorizationRequired`, last attempt/success/full-sync times, safe error code, activity count |
+| Route | Access | Response |
+| --- | --- | --- |
+| `GET /api/running/mileage?timezone=UTC` | Public; no token | `timezone`, `startDate`, `endDate`, and 365 `days` containing `date` and `distanceMeters`; invalid timezone returns 400 |
+| `GET /api/strava/activities?limit=50&offset=0` | Bearer `STRAVA_READ_TOKEN` | `activities`, `total`, `limit`, `offset`; newest start date first, then descending ID |
+| `GET /api/strava/sync` | Bearer `STRAVA_READ_TOKEN` | `configured`, `authorizationRequired`, last attempt/success/full-sync times, safe error code, activity count |
 
 Limit is 1–200; offset is 0–1,000,000. The status endpoint exposes no credentials.
 Before the first job, status is unconfigured and activities are empty. The API
@@ -201,7 +246,7 @@ Changing athlete requires explicitly removing the previous connection and data.
 
 ## Recovery
 
-Inspect `GET /api/strava/sync` and failed Job logs. Ordinary network/server/rate
+Inspect `GET /api/strava/sync` using the private read token, and inspect failed Job logs. Ordinary network/server/rate
 failures retain cached data and retry on the next schedule. There is no alerting
 integration yet; Kubernetes Job failure and the status endpoint expose failures.
 

@@ -105,6 +105,18 @@ class StravaRepository {
                 r.getObject("average_speed_mps", Double.class)), limit, offset);
     }
 
+    List<RunDistance> runningDistances(Instant start, Instant end) {
+        return jdbc.query("""
+                SELECT start_date, distance_meters FROM strava_activities
+                WHERE start_date >= ? AND start_date < ?
+                  AND sport_type IN ('Run', 'TrailRun', 'VirtualRun')
+                ORDER BY start_date, id
+                """, (r, row) -> new RunDistance(instant(r.getTimestamp("start_date")),
+                        r.getDouble("distance_meters")), timestamp(start), timestamp(end));
+    }
+
+    record RunDistance(Instant startDate, double distanceMeters) {}
+
     long count() { return jdbc.queryForObject("SELECT count(*) FROM strava_activities", Long.class); }
     static Timestamp timestamp(Instant value) { return value == null ? null : Timestamp.from(value); }
     static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }

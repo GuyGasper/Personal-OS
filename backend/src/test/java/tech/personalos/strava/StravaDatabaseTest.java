@@ -132,6 +132,42 @@ class StravaDatabaseTest {
         assertEquals(400, request("/api/strava/activities?offset=-1", bearer, null).statusCode());
     }
     @Test
+    void publicMileageReadsOnlyRunningDistancesInsideTheLocalWindow() throws Exception {
+        var zone = java.time.ZoneId.of("America/Chicago");
+        var start = java.time.LocalDate.of(2025, 11, 3);
+        var end = java.time.LocalDate.of(2026, 11, 2);
+        var boundary = Instant.parse("2026-11-03T06:00:00Z");
+        repository.snapshot(List.of(
+                activity(1, "Private run name", "2025-11-03T06:00:00Z"),
+                activity(2, "Too early", "2025-11-03T05:59:59Z"),
+                activity(3, "Too late", "2026-11-03T06:00:00Z"),
+                new StravaRepository.Activity(4, 42, "Private ride", "Ride", Instant.parse("2026-11-02T12:00:00Z"),
+                        99999, 1000, 1000, 0, null, null, null),
+                new StravaRepository.Activity(5, 42, "Private trail", "TrailRun", Instant.parse("2026-11-02T12:00:00Z"),
+                        1609.344, 1000, 1000, 0, null, null, null),
+                new StravaRepository.Activity(6, 42, "Private virtual", "VirtualRun", Instant.parse("2026-11-02T13:00:00Z"),
+                        3218.688, 1000, 1000, 0, null, null, null)), null, boundary, boundary, true);
+        var runs = repository.runningDistances(start.atStartOfDay(zone).toInstant(), end.plusDays(1).atStartOfDay(zone).toInstant());
+        assertEquals(3, runs.size());
+        var mileage = RunningController.summarize(runs, zone, end);
+        assertEquals(5000, mileage.days().getFirst().distanceMeters());
+        assertEquals(4828.032, mileage.days().getLast().distanceMeters(), 0.0001);
+
+        var response = request("/api/running/mileage?timezone=America%2FChicago", null, null);
+        assertEquals(200, response.statusCode());
+        var body = json.readTree(response.body());
+        assertEquals(365, body.path("days").size());
+        assertEquals(4, body.size());
+        assertEquals(2, body.path("days").get(0).size());
+        assertFalse(response.body().contains("Private"));
+        assertFalse(response.body().contains("athleteId"));
+        assertFalse(response.body().contains("heartrate"));
+        assertFalse(response.body().contains("token"));
+        assertEquals(401, request("/api/strava/activities", null, null).statusCode());
+        assertEquals(401, request("/api/strava/sync", null, null).statusCode());
+        assertEquals(400, request("/api/running/mileage?timezone=invalid", null, null).statusCode());
+    }
+    @Test
     void runsTheActualNonWebJobAndReturnsAfterClosingItsContext() throws Exception {
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/token", exchange -> {

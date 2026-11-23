@@ -149,7 +149,7 @@ class StravaDatabaseTest {
                         3218.688, 1000, 1000, 0, null, null, null)), null, boundary, boundary, true);
         var runs = repository.runningDistances(start.atStartOfDay(zone).toInstant(), end.plusDays(1).atStartOfDay(zone).toInstant());
         assertEquals(3, runs.size());
-        var mileage = RunningController.summarize(runs, zone, end);
+        var mileage = RunningController.summarize(runs, zone, start, end);
         assertEquals(5000, mileage.days().getFirst().distanceMeters());
         assertEquals(4828.032, mileage.days().getLast().distanceMeters(), 0.0001);
 
@@ -166,6 +166,15 @@ class StravaDatabaseTest {
         assertEquals(401, request("/api/strava/activities", null, null).statusCode());
         assertEquals(401, request("/api/strava/sync", null, null).statusCode());
         assertEquals(400, request("/api/running/mileage?timezone=invalid", null, null).statusCode());
+        var custom = request("/api/running/mileage?timezone=America%2FChicago&startDate=2026-11-01&endDate=2026-11-02", null, null);
+        assertEquals(200, custom.statusCode());
+        var selected = json.readTree(custom.body());
+        assertEquals(2, selected.path("days").size());
+        assertEquals(0, selected.path("days").get(0).path("distanceMeters").asDouble());
+        assertEquals(4828.032, selected.path("days").get(1).path("distanceMeters").asDouble(), 0.0001);
+        for (var query : List.of("startDate=2026-11-01", "startDate=2026-11-02&endDate=2026-11-01",
+                "startDate=2026-02-30&endDate=2026-03-01", "startDate=1900-01-01&endDate=2026-11-02"))
+            assertEquals(400, request("/api/running/mileage?" + query, null, null).statusCode());
     }
     @Test
     void runsTheActualNonWebJobAndReturnsAfterClosingItsContext() throws Exception {

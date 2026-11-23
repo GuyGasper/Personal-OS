@@ -4,7 +4,7 @@ The hourly OKE CronJob uses the existing API image in the `strava-sync` profile.
 It starts without an HTTP server, imports Strava activity summaries into the
 private PostgreSQL database, closes its connections and exits. The HTTP API only
 queries PostgreSQL. The Running (02) workspace card opens `/running`, where the
-rolling mileage graph reads these imported summaries.
+mileage graph reads these imported summaries for a selectable date window.
 
 ```text
 Strava OAuth/API → OKE CronJob → PostgreSQL → public daily mileage API → running UI
@@ -106,14 +106,31 @@ public daily running mileage automatically from PostgreSQL. It does not ask for
 a token, contact Strava, or download detailed activity records. Anyone who can
 reach the site can view these mileage totals.
 
-`GET /api/running/mileage?timezone=America/Chicago` returns exactly 365 daily
-records, including today, with only each date and its distance in meters. The
-server filters Run, TrailRun, and VirtualRun activities and handles local-day
-boundaries across daylight saving. The browser converts meters to miles and
-builds the cumulative line. Rest days keep the total steady. The day slider
-supports touch and keyboard inspection. **Refresh mileage** rereads imported data;
-the existing hourly job handles Strava sync.
+The graph defaults to the last 365 local days, including today. Choose **Start
+date** and **End date**, then select **Search mileage** to view a different
+period. Both dates are inclusive; single-day searches and multi-year windows are
+supported. **Last 365 days** restores the rolling-year window. The graph and day
+slider scale to the number of days selected, with mileage accumulated from the
+selected start date. Days without runs keep the total steady.
 
+`GET /api/running/mileage?timezone=America/Chicago` keeps the 365-day default.
+For a custom window, supply both ISO dates:
+
+```text
+/api/running/mileage?timezone=America/Chicago&startDate=2026-11-01&endDate=2026-11-23
+```
+
+The endpoint returns one record for every local day in the requested window,
+containing only the date and running distance in meters. The server filters Run,
+TrailRun, and VirtualRun activities and handles daylight-saving boundaries. The
+browser converts meters to miles and builds the cumulative line. The day slider
+supports touch and keyboard inspection. **Refresh mileage** rereads the selected
+window; the existing hourly job handles Strava sync.
+
+Supply both dates or omit both. Dates must be valid, the start must not follow
+the end, the end cannot be later than today in the requested timezone, and the
+window is limited to 36,600 inclusive days to bound public responses. Invalid
+dates, ranges, or timezones return HTTP 400. No token is required.
 
 ## Local run
 
@@ -138,7 +155,7 @@ characters. This does not affect the public mileage endpoint.
 
 | Route | Access | Response |
 | --- | --- | --- |
-| `GET /api/running/mileage?timezone=UTC` | Public; no token | `timezone`, `startDate`, `endDate`, and 365 `days` containing `date` and `distanceMeters`; invalid timezone returns 400 |
+| `GET /api/running/mileage?timezone=UTC` | Public; no token | `timezone`, `startDate`, `endDate`, and daily `days` containing `date` and `distanceMeters`; optional paired `startDate`/`endDate` select a window, otherwise the last 365 days; invalid query returns 400 |
 | `GET /api/strava/activities?limit=50&offset=0` | Bearer `STRAVA_READ_TOKEN` | `activities`, `total`, `limit`, `offset`; newest start date first, then descending ID |
 | `GET /api/strava/sync` | Bearer `STRAVA_READ_TOKEN` | `configured`, `authorizationRequired`, last attempt/success/full-sync times, safe error code, activity count |
 

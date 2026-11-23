@@ -3,7 +3,7 @@
 A personal operating system for budgeting, running, and network calculations.
 
 The app provides a React + TypeScript workspace and a Java 21 / Spring Boot API.
-The Running (02) card opens a rolling 365-day cumulative mileage graph backed by
+The Running (02) card opens a cumulative mileage graph with a selectable date window backed by
 imported Strava runs. Budgeting and Network remain planned. The API connects to private PostgreSQL with Flyway
 migrations. A single-athlete Strava backend now imports activity summaries through
 an opt-in hourly OKE job and serves private database-backed read endpoints.
@@ -70,7 +70,7 @@ npm run dev
 | --- | --- |
 | `GET /api/status` | Service name, UP status, version, UTC time, and planned modules |
 | `GET /api`, `GET /api/` | Same status response |
-| `GET /api/running/mileage?timezone=America/Chicago` | Public daily running distances for the last 365 local days |
+| `GET /api/running/mileage?timezone=America/Chicago` | Public daily running distances; optional paired `startDate`/`endDate`, defaulting to the last 365 local days |
 | `GET /api/strava/activities` | Private, paginated locally stored Strava activities |
 | `GET /api/strava/sync` | Private sync timestamps, activity count and safe error codes |
 | `GET /health/live` | Kubernetes liveness; independent of external systems |

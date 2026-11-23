@@ -97,15 +97,15 @@ footer > span:last-child { font-size: 8px; letter-spacing: 1.4px; }
 .mileage-summary p { font-size: 12px; color: #697563; line-height: 1.9; margin-top: 6px; }
 .mileage-summary p > span { margin: 0 7px; }
 .mileage-chart { display: block; width: 100%; height: auto; margin: 22px 0 14px; overflow: visible; }
+.mileage-chart:focus-visible { outline: 2px solid #417b5a; outline-offset: 4px; border-radius: 6px; }
 .mileage-chart text { font-family: 'DM Sans', sans-serif; font-size: 12px; fill: #6e7865; }
 .mileage-chart .axis-title { font-size: 10px; letter-spacing: 1.2px; }
 .chart-grid { stroke: #e9ece2; stroke-width: 1; }
 .mileage-line { fill: none; stroke: #aa7759; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .chart-guide { stroke: #c5af9c; stroke-width: 1; stroke-dasharray: 4 5; }
-.day-inspector { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 1.8; }
+.day-inspector { margin-bottom: 18px; display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 1.8; }
 .day-inspector span { color: #697563; }
 .day-inspector output { white-space: nowrap; }
-.day-slider { display: block; width: 100%; margin: 12px 0 16px; accent-color: #aa7759; cursor: pointer; min-height: 24px; }
 .mileage-note { border-top: 1px solid #edf0e8; padding-top: 16px; color: #697563; font-size: 11px; line-height: 1.8; }
 .running-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 18px; color: #697563; font-size: 11px; line-height: 1.8; }
 .running-actions > div { display: flex; gap: 16px; }
@@ -136,17 +136,9 @@ input:focus-visible { outline: 3px solid #417b5a; outline-offset: 3px; }
   .mileage-chart .axis-title { font-size: 20px; }
 }
 .date-window { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 22px 24px; border: 1px solid #dfe5d9; border-radius: 12px; background: #eef2e8; }
-.date-field { flex: 1; min-width: 150px; }
-.date-field label { display: block; margin-bottom: 8px; font-size: 11px; color: #60735f; }
-.date-field input { width: 100%; min-width: 0; border: 1px solid #d5dfce; border-radius: 6px; padding: 10px 12px; background: #fffefb; color: #233a30; font: inherit; font-size: 13px; }
 .date-window .primary-button { min-height: 40px; }
 .date-window .text-button { min-height: 40px; padding: 0 4px; }
-.date-window-error { flex-basis: 100%; font-size: 12px; line-height: 1.6; color: #914c28; }
-.date-field input:focus-visible { outline: 3px solid #417b5a; outline-offset: 3px; }
-.day-slider:disabled { cursor: default; }
 @media (max-width: 620px) {
   .date-window { padding: 18px 16px; gap: 14px; }
-  .date-field { flex-basis: calc(50% - 7px); min-width: 0; }
-  .date-field input { padding: 10px 6px; }
   .date-window .primary-button { flex: 1; }
 }

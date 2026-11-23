@@ -3,17 +3,17 @@ export type MileageRange = { startDate: string; endDate: string };
 const METERS_PER_MILE = 1609.344;
 const MAX_DAYS = 36_600;
 
-function dateValue(date: Date): string {
+export function mileageDateValue(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 export function defaultMileageRange(now = new Date()): MileageRange {
   const start = new Date(now);
   start.setDate(start.getDate() - 364);
-  return { startDate: dateValue(start), endDate: dateValue(now) };
+  return { startDate: mileageDateValue(start), endDate: mileageDateValue(now) };
 }
 
-function parseDate(value: unknown): Date | null {
+export function parseMileageDate(value: unknown): Date | null {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(year, month - 1, day);
@@ -27,8 +27,8 @@ function dayCount(start: Date, end: Date): number {
 
 export function mileageRangeError(range: MileageRange): string | null {
   if (!range.startDate || !range.endDate) return 'Choose both a start and end date.';
-  const start = parseDate(range.startDate);
-  const end = parseDate(range.endDate);
+  const start = parseMileageDate(range.startDate);
+  const end = parseMileageDate(range.endDate);
   if (!start || !end) return 'Enter valid start and end dates.';
   const count = dayCount(start, end);
   if (count < 1) return 'Start date must be on or before end date.';
@@ -47,8 +47,8 @@ export async function loadRunningMileage(signal: AbortSignal, range: MileageRang
   const invalid = () => new Error('The running data response was not recognized.');
   if (!data || typeof data !== 'object') throw invalid();
   const mileage = data as Record<string, unknown>;
-  const start = parseDate(mileage.startDate);
-  const end = parseDate(mileage.endDate);
+  const start = parseMileageDate(mileage.startDate);
+  const end = parseMileageDate(mileage.endDate);
   if (!start || !end || mileage.startDate !== range.startDate || mileage.endDate !== range.endDate
     || !Array.isArray(mileage.days)) throw invalid();
   const count = dayCount(start, end);
@@ -57,7 +57,7 @@ export async function loadRunningMileage(signal: AbortSignal, range: MileageRang
   const days = mileage.days.map((value: unknown, index: number): MileageDay => {
     if (!value || typeof value !== 'object') throw invalid();
     const item = value as Record<string, unknown>;
-    const date = parseDate(item.date);
+    const date = parseMileageDate(item.date);
     const expected = new Date(start);
     expected.setDate(expected.getDate() + index);
     if (!date || date.getTime() !== expected.getTime() || typeof item.distanceMeters !== 'number'

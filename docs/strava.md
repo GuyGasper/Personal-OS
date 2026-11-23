@@ -106,11 +106,13 @@ public daily running mileage automatically from PostgreSQL. It does not ask for
 a token, contact Strava, or download detailed activity records. Anyone who can
 reach the site can view these mileage totals.
 
-The graph defaults to the last 365 local days, including today. Choose **Start
-date** and **End date**, then select **Search mileage** to view a different
-period. Both dates are inclusive; single-day searches and multi-year windows are
+The graph defaults to the last 365 local days, including today. Open **Date range**,
+select a start and end date in the custom calendar, then choose **Apply dates**
+to update the graph. The picker includes 30-day, 90-day, and last-year presets;
+you can also type ISO dates in its Start date and End date fields. **Cancel** or
+Escape dismisses changes. Both dates are inclusive; single-day searches and multi-year windows are
 supported. **Last 365 days** restores the rolling-year window. The graph and day
-slider scale to the number of days selected, with mileage accumulated from the
+inspector scale to the number of days selected, with mileage accumulated from the
 selected start date. Days without runs keep the total steady.
 
 `GET /api/running/mileage?timezone=America/Chicago` keeps the 365-day default.
@@ -123,8 +125,8 @@ For a custom window, supply both ISO dates:
 The endpoint returns one record for every local day in the requested window,
 containing only the date and running distance in meters. The server filters Run,
 TrailRun, and VirtualRun activities and handles daylight-saving boundaries. The
-browser converts meters to miles and builds the cumulative line. The day slider
-supports touch and keyboard inspection. **Refresh mileage** rereads the selected
+browser converts meters to miles and builds the cumulative line. Hover or tap the graph to inspect a day; when focused, the graph supports
+Left/Right arrows and Home/End for keyboard inspection. **Refresh mileage** rereads the selected
 window; the existing hourly job handles Strava sync.
 
 Supply both dates or omit both. Dates must be valid, the start must not follow

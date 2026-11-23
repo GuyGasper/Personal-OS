@@ -1,5 +1,6 @@
+import DateRangePicker from './DateRangePicker';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { defaultMileageRange, loadRunningMileage, mileageRangeError, type MileageDay, type MileageRange } from './running';
+import { defaultMileageRange, loadRunningMileage, type MileageDay, type MileageRange } from './running';
 
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 const dateLabel = (date: Date) => date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -36,10 +37,17 @@ function MileageChart({ days }: { days: MileageDay[] }) {
       <span className="period-pill">{count.toLocaleString()} {count === 1 ? 'DAY' : 'DAYS'}</span>
     </div>
     <div className="mileage-summary"><strong>{number.format(total)}<span> mi</span></strong><p>Total running mileage <span>·</span> {dateLabel(days[0].date)} – {dateLabel(days[count - 1].date)}</p></div>
-    <svg className="mileage-chart" viewBox={`0 0 ${width} 350`} role="img" aria-labelledby="chart-title chart-description"
+    <svg className="mileage-chart" viewBox={`0 0 ${width} 350`} role="img" tabIndex={0} aria-labelledby="chart-title chart-description"
+      onKeyDown={event => {
+        const next = event.key === 'ArrowLeft' ? selectedIndex - 1 : event.key === 'ArrowRight' ? selectedIndex + 1
+          : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null;
+        if (next === null) return;
+        event.preventDefault();
+        setSelected(Math.max(0, Math.min(count - 1, next)));
+      }}
       onPointerDown={selectDay} onPointerMove={event => { if (event.pointerType === 'mouse' || event.buttons) selectDay(event); }}>
       <title id="chart-title">Running mileage for the selected date window</title>
-      <desc id="chart-description">Days 1 through {count} on the horizontal axis; cumulative miles on the vertical axis. Total {number.format(total)} miles. Use the day slider below to inspect each day.</desc>
+      <desc id="chart-description">Days 1 through {count} on the horizontal axis; cumulative miles on the vertical axis. Total {number.format(total)} miles. Hover or tap the graph to inspect a day. Focus the graph and use the Left and Right arrow keys, Home, or End to move between days.</desc>
       <defs><linearGradient id="mileage-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#aa7759" stopOpacity=".17" /><stop offset="100%" stopColor="#aa7759" stopOpacity=".01" /></linearGradient></defs>
       <text x="76" y="23" className="axis-title">TOTAL MILEAGE (MI)</text>
       {[0, 1, 2, 3, 4].map(tick => <g key={tick}><line x1="76" x2={right} y1={y(top * tick / 4)} y2={y(top * tick / 4)} className="chart-grid" /><text x="62" y={y(top * tick / 4) + 4} textAnchor="end">{new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(top * tick / 4)}</text></g>)}
@@ -50,18 +58,13 @@ function MileageChart({ days }: { days: MileageDay[] }) {
       <line x1={x(selectedIndex)} x2={x(selectedIndex)} y1="50" y2="290" className="chart-guide" />
       <circle cx={x(selectedIndex)} cy={y(current.total)} r="5" fill="#aa7759" stroke="#fffefb" strokeWidth="3" />
     </svg>
-    <div className="day-inspector"><label htmlFor="mileage-day">Day {current.day} <span>· {dateLabel(current.date)}</span></label><output htmlFor="mileage-day">{number.format(current.total)} mi <span>total</span></output></div>
-    <input id="mileage-day" className="day-slider" type="range" min="1" max={count} value={selectedIndex + 1} disabled={count === 1} aria-label="Inspect day"
-      aria-valuetext={`Day ${current.day}, ${dateLabel(current.date)}, ${number.format(current.total)} total miles, ${number.format(current.miles)} miles run`}
-      onChange={event => setSelected(Number(event.target.value) - 1)} />
+    <div className="day-inspector" aria-live="polite"><span>Day {current.day} <span>· {dateLabel(current.date)}</span></span><output>{number.format(current.total)} mi <span>total</span></output></div>
     <p className="mileage-note">{total === 0 ? 'No runs recorded in this period. Your miles will appear here after your next Strava import.' : 'Your miles add up from day 1. Days without a run keep the total steady.'}</p>
   </section>;
 }
 
 export default function RunningPage() {
   const [range, setRange] = useState<MileageRange>(() => defaultMileageRange());
-  const [draft, setDraft] = useState(range);
-  const [rangeError, setRangeError] = useState<string | null>(null);
   const [mileage, setMileage] = useState<MileageState>({ state: 'loading' });
   const activeRequest = useRef<AbortController | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -96,18 +99,10 @@ export default function RunningPage() {
       <h1 id="running-title" tabIndex={-1} ref={heading}>See the miles <span>add up.</span></h1>
       <p>Your running, one day at a time.<br />Choose a date window and see your cumulative mileage.</p>
     </section>
-    <form className="date-window" aria-label="Mileage date window" noValidate onSubmit={event => {
-      event.preventDefault();
-      const error = mileageRangeError(draft);
-      setRangeError(error);
-      if (!error) setRange({ ...draft });
-    }}>
-      <div className="date-field"><label htmlFor="mileage-start">Start date</label><input id="mileage-start" type="date" required max={defaultMileageRange().endDate} value={draft.startDate} onChange={event => { setDraft({ ...draft, startDate: event.target.value }); setRangeError(null); }} /></div>
-      <div className="date-field"><label htmlFor="mileage-end">End date</label><input id="mileage-end" type="date" required max={defaultMileageRange().endDate} value={draft.endDate} onChange={event => { setDraft({ ...draft, endDate: event.target.value }); setRangeError(null); }} /></div>
-      <button className="primary-button" type="submit">Search mileage ↗</button>
-      <button className="text-button" type="button" onClick={() => { const dates = defaultMileageRange(); setDraft(dates); setRange(dates); setRangeError(null); }}>Last 365 days</button>
-      {rangeError && <p className="date-window-error" role="alert">{rangeError}</p>}
-    </form>
+    <div className="date-window">
+      <DateRangePicker value={range} onChange={setRange} />
+      <button className="text-button" type="button" onClick={() => setRange(defaultMileageRange())}>Last 365 days</button>
+    </div>
     {mileage.state === 'ready' ? <>
       <MileageChart days={mileage.days} />
       <div className="running-actions"><span>Imported from Strava · Runs only · Dates in your local time</span><button type="button" className="text-button" onClick={() => void load()}>Refresh mileage ↻</button></div>
